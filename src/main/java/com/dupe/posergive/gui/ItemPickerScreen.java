@@ -62,10 +62,12 @@ public class ItemPickerScreen extends Screen {
         nbtField = new TextFieldWidget(this.textRenderer, 10, 45, this.width - 20, 20, Text.literal("NBT"));
         nbtField.setMaxLength(Integer.MAX_VALUE);
         nbtField.setPlaceholder(Text.literal("NBT тега предмета (без лимита длины)"));
+        nbtField.setChangedListener(v -> generateCompoundFromSelected(false));
         addDrawableChild(nbtField);
 
         countField = new TextFieldWidget(this.textRenderer, 10, 70, 60, 20, Text.literal("Count"));
         countField.setText("64");
+        countField.setChangedListener(v -> generateCompoundFromSelected(false));
         addDrawableChild(countField);
 
         int x = 80;
@@ -83,7 +85,7 @@ public class ItemPickerScreen extends Screen {
         rawCompoundField.setPlaceholder(Text.literal("Raw CompoundTag для отправки на сервер (без лимита длины)"));
         addDrawableChild(rawCompoundField);
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Сгенерировать"), b -> generateCompoundFromSelected())
+        addDrawableChild(ButtonWidget.builder(Text.literal("Сгенерировать"), b -> generateCompoundFromSelected(true))
             .dimensions(this.width - 220, 120, 100, 20).build());
         addDrawableChild(ButtonWidget.builder(Text.literal("Отправить на сервер"), b -> sendCompound())
             .dimensions(this.width - 115, 120, 105, 20).build());
@@ -101,10 +103,10 @@ public class ItemPickerScreen extends Screen {
 
         scrollRow = 0;
         selected = filteredItems.isEmpty() ? null : filteredItems.getFirst();
-        generateCompoundFromSelected();
+        generateCompoundFromSelected(false);
     }
 
-    private void generateCompoundFromSelected() {
+    private void generateCompoundFromSelected(boolean notify) {
         if (selected == null) {
             return;
         }
@@ -117,9 +119,12 @@ public class ItemPickerScreen extends Screen {
                 stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(net.minecraft.nbt.StringNbtReader.parse(nbt)));
             }
             rawCompoundField.setText(ArmorPoserBridge.buildMainhandTemplate(stack));
+            if (notify && client != null && client.player != null) {
+                client.player.sendMessage(Text.literal("[PoserGive] CompoundTag обновлен из выбранного предмета."), false);
+            }
         } catch (Exception e) {
             if (client != null && client.player != null) {
-                client.player.sendMessage(Text.literal("[PoserGive] Ошибка генерации: " + e.getMessage()), true);
+                client.player.sendMessage(Text.literal("[PoserGive] Ошибка генерации: " + e.getMessage()), false);
             }
         }
     }
@@ -145,7 +150,7 @@ public class ItemPickerScreen extends Screen {
                 int cy = gridY + (i / COLS) * SLOT;
                 if (mouseX >= cx && mouseX <= cx + 16 && mouseY >= cy && mouseY <= cy + 16) {
                     selected = filteredItems.get(index);
-                    generateCompoundFromSelected();
+                    generateCompoundFromSelected(false);
                     return true;
                 }
             }
