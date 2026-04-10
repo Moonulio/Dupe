@@ -7,21 +7,19 @@ import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
 /**
- * Выдача предметов.
- *
- * 1) В creative: штатно через clickCreativeStack + CreativeInventoryActionC2SPacket.
- * 2) В survival/adventure: "unsafe" режим для серверов, где разрешены уязвимые client-driven
- *    обновления инвентаря (или где это проксируется модом стойки/Armor Poser).
+ * Выдача предметов/применение к стойке.
  */
 public final class ItemGiveService {
     private ItemGiveService() {
     }
 
-    public static boolean give(ItemStack stack, int slot) {
+    public static boolean give(ItemStack stack, int slot, String rawSnbtComponents) {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity player = client.player;
         ClientPlayerInteractionManager interactionManager = client.interactionManager;
@@ -32,36 +30,69 @@ public final class ItemGiveService {
 
         ItemStack copy = stack.copy();
 
+        // 1) Обычный creative путь
         if (player.getAbilities().creativeMode) {
             interactionManager.clickCreativeStack(copy, slot);
             player.networkHandler.sendPacket(new CreativeInventoryActionC2SPacket(slot, copy));
             return true;
         }
 
-        if (!ModConfig.get().allowUnsafeWithoutCreative) {
+        // 2) Без creative: пытаемся изменить NBT стойки через команду data merge.
+        // Требует прав (op/cheats) на стороне сервера, но работает в survival.
+        if (tryApplyToLookedArmorStandViaCommand(copy, rawSnbtComponents)) {
+            return true;
+        }
+
+        // 3) Legacy unsafe пакетный fallback (как было ранее), только если включено в конфиге.
+        if (!ModConfig.get().allowUnsafeWithoutCreative || !isLookingAtArmorStand(client)) {
             return false;
         }
 
-        // Нон-креатив сценарий: разрешаем попытку только когда игрок смотрит на стойку,
-        // чтобы использовать workflow "через стойку".
-        if (!isLookingAtArmorStand(client)) {
-            return false;
-        }
-
-        // На части серверов это будет отклонено (и это нормально), но на серверах/модпаках,
-        // где Armor Poser или иная логика проксирует обновление, предмет может примениться.
         player.networkHandler.sendPacket(new CreativeInventoryActionC2SPacket(slot, copy));
         return true;
     }
 
+    private static boolean tryApplyToLookedArmorStandViaCommand(ItemStack stack, String rawSnbtComponents) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        ClientPlayerEntity player = client.player;
+
+        ArmorStandEntity stand = getLookedArmorStand(client);
+        if (player == null || stand == null) {
+            return false;
+        }
+
+        Identifier id = Registries.ITEM.getId(stack.getItem());
+        if (id == null) {
+            return false;
+        }
+
+        String components = rawSnbtComponents == null || rawSnbtComponents.isBlank()
+                ? "{}"
+                : rawSnbtComponents.trim();
+
+        // Для 1.21+ item данные в командах используют components.
+        String handItem = "{id:\"" + id + "\",count:" + stack.getCount() + ",components:" + components + "}";
+        String cmd = "data merge entity " + stand.getUuidAsString() + " {Invisible:0b,Marker:0b,HandItems:[" + handItem + ",{}]}";
+
+        player.networkHandler.sendChatCommand(cmd);
+        return true;
+    }
+
     private static boolean isLookingAtArmorStand(MinecraftClient client) {
+        return getLookedArmorStand(client) != null;
+    }
+
+    private static ArmorStandEntity getLookedArmorStand(MinecraftClient client) {
         HitResult hitResult = client.crosshairTarget;
         if (hitResult == null || hitResult.getType() != HitResult.Type.ENTITY) {
-            return false;
+            return null;
         }
         if (!(hitResult instanceof EntityHitResult entityHitResult)) {
-            return false;
+            return null;
         }
-        return entityHitResult.getEntity() instanceof ArmorStandEntity;
+        if (entityHitResult.getEntity() instanceof ArmorStandEntity stand) {
+            return stand;
+        }
+        return null;
     }
 }

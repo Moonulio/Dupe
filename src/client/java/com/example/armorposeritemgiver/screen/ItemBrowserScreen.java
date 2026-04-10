@@ -180,10 +180,11 @@ public class ItemBrowserScreen extends Screen {
 
         MinecraftClient client = MinecraftClient.getInstance();
         int selected = client.player == null ? 36 : 36 + client.player.getInventory().selectedSlot;
-        boolean ok = ItemGiveService.give(stack, selected);
+        String rawComponents = nbtField.getText().trim();
+        boolean ok = ItemGiveService.give(stack, selected, rawComponents);
         status = ok
-                ? Text.literal("Предмет отправлен (creative/стойка-режим)")
-                : Text.literal("Не удалось: встаньте на креатив или наведитесь на стойку");
+                ? Text.literal("Готово: предмет отправлен (инвентарь/стойка)")
+                : Text.literal("Не удалось: нужен creative или права на /data merge");
     }
 
     @Override
