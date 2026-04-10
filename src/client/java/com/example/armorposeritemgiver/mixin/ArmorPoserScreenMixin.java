@@ -77,8 +77,9 @@ public abstract class ArmorPoserScreenMixin extends Screen {
      * Извлекает стойку для брони из текущего экрана Armor Poser через рефлексию.
      * <p>
      * Пробует два подхода:
-     * 1. Метод getArmorStandEntity() — публичный геттер в ArmorStandScreen
-     * 2. Поле entityArmorStand — приватное поле класса
+     * 1. Метод getArmorStandEntity() — protected геттер в ArmorStandScreen
+     *    (используем getDeclaredMethod + setAccessible, т.к. метод не public)
+     * 2. Поле entityArmorStand — private final поле класса
      * <p>
      * Используется рефлексия, т.к. миксин @Pseudo не позволяет @Shadow.
      *
@@ -86,8 +87,10 @@ public abstract class ArmorPoserScreenMixin extends Screen {
      */
     private ArmorStandEntity extractArmorStand() {
         // Способ 1: Попытка вызвать метод getArmorStandEntity()
+        // Метод protected → getDeclaredMethod (getMethod находит только public)
         try {
-            Method getter = this.getClass().getMethod("getArmorStandEntity");
+            Method getter = this.getClass().getDeclaredMethod("getArmorStandEntity");
+            getter.setAccessible(true);
             Object result = getter.invoke(this);
             if (result instanceof ArmorStandEntity stand) {
                 return stand;
@@ -96,7 +99,7 @@ public abstract class ArmorPoserScreenMixin extends Screen {
             // Метод не найден или ошибка — пробуем поле
         }
 
-        // Способ 2: Попытка получить поле entityArmorStand
+        // Способ 2: Попытка получить поле entityArmorStand (private final)
         try {
             Field field = this.getClass().getDeclaredField("entityArmorStand");
             field.setAccessible(true);

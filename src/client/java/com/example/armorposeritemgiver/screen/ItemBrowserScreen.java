@@ -77,7 +77,7 @@ public class ItemBrowserScreen extends Screen {
 
     /**
      * Создаёт экран Item Browser без привязки к конкретной стойке.
-     * Предметы будут выдаваться на стойку, на которую смотрит игрок.
+     * При открытии пытается захватить стойку по crosshairTarget игрока.
      *
      * @param parent родительский экран для возврата при закрытии
      */
@@ -89,16 +89,26 @@ public class ItemBrowserScreen extends Screen {
     /**
      * Создаёт экран Item Browser с привязкой к конкретной стойке для брони.
      * Используется при открытии из экрана Armor Poser.
-     * Родительский экран (parent) также используется как экран Armor Poser
-     * для вызова updateEntity() при выдаче предметов.
+     * <p>
+     * Если armorStand == null, пытается захватить стойку по crosshairTarget
+     * прямо в момент создания экрана (пока crosshairTarget ещё актуален).
+     * После открытия экрана crosshairTarget перестаёт обновляться.
      *
-     * @param parent      родительский экран (экран Armor Poser) для возврата при закрытии
-     * @param armorStand  целевая стойка для брони (может быть null)
+     * @param parent      родительский экран для возврата при закрытии
+     * @param armorStand  целевая стойка для брони (может быть null — тогда ищем по взгляду)
      */
     public ItemBrowserScreen(Screen parent, ArmorStandEntity armorStand) {
         super(Text.literal("Armor Poser \u2014 Item Giver"));
         this.parent = parent;
-        this.targetArmorStand = armorStand;
+
+        // Если стойка не передана, захватываем по crosshairTarget ПРЯМО СЕЙЧАС,
+        // пока он ещё актуален (до открытия экрана MC перестанет его обновлять)
+        if (armorStand != null) {
+            this.targetArmorStand = armorStand;
+        } else {
+            this.targetArmorStand = ItemGiveService.getLookedArmorStand(
+                    MinecraftClient.getInstance());
+        }
     }
 
     /**
@@ -308,7 +318,7 @@ public class ItemBrowserScreen extends Screen {
         if (ok) {
             status = Text.literal("Готово: предмет отправлен на стойку (x" + count + ")");
         } else {
-            status = Text.literal("Не найдена стойка. Откройте из Armor Poser");
+            status = Text.literal("Не найдена стойка. Смотрите на стойку при нажатии P или откройте из Armor Poser");
         }
     }
 
