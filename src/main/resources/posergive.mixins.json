@@ -1,0 +1,11 @@
+{
+  "required": false,
+  "package": "com.dupe.posergive.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ScreenInitMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

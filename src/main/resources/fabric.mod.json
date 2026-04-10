@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "posergive",
+  "version": "${version}",
+  "name": "Poser Give Client",
+  "description": "Client-side item picker integrated with Armor Poser UI via mixins.",
+  "authors": ["Codex"],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.dupe.posergive.client.PoserGiveClient"
+    ]
+  },
+  "mixins": [
+    "posergive.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "armorposer": ">=8.1.2"
+  }
+}
