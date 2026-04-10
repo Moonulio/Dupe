@@ -3,7 +3,7 @@
   "id": "armorposer-itemgiver",
   "version": "${version}",
   "name": "Armor Poser Item Giver",
-  "description": "Клиентское дополнение к Armor Poser: поиск и выдача любых предметов в креативе.",
+  "description": "Клиентское дополнение к Armor Poser: поиск и выдача любых предметов на стойку для брони. Работает без креатива/оператора.",
   "authors": [
     "Moonulio"
   ],

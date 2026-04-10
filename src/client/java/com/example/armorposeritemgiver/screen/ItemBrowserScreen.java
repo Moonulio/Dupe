@@ -9,6 +9,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
@@ -23,16 +24,17 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Экран поиска и выдачи предметов (Item Browser).
+ * Экран поиска и выдачи предметов на стойку для брони (Item Browser).
  * <p>
- * Предоставляет интерфейс в стиле творческого режима:
+ * Интерфейс:
  * <ul>
  *   <li>Поле поиска по ID или названию предмета</li>
- *   <li>Поле ввода NBT-тегов (SNBT-формат)</li>
+ *   <li>Поле ввода NBT-данных без ограничения по символам (SNBT-формат)</li>
  *   <li>Категории по пространствам имён (minecraft, modid и т.д.)</li>
- *   <li>Постраничная навигация по 45 предметов на странице (9×5 сетка)</li>
+ *   <li>Постраничная навигация по 45 предметов на странице (9x5 сетка)</li>
  * </ul>
- * При клике на предмет он выдаётся игроку через {@link ItemGiveService}.
+ * При клике на предмет он выдаётся на стойку для брони через {@link ItemGiveService}.
+ * Работает без оператора и креативного режима.
  */
 @Environment(EnvType.CLIENT)
 public class ItemBrowserScreen extends Screen {
@@ -47,9 +49,15 @@ public class ItemBrowserScreen extends Screen {
     /** Родительский экран (для возврата при закрытии) */
     private final Screen parent;
 
+    /**
+     * Ссылка на стойку для брони из экрана Armor Poser.
+     * Может быть null, если экран открыт через горячую клавишу.
+     */
+    private final ArmorStandEntity targetArmorStand;
+
     /** Поле поиска по ID/названию предмета */
     private TextFieldWidget searchField;
-    /** Поле ввода NBT-компонентов в SNBT-формате */
+    /** Поле ввода NBT-компонентов в SNBT-формате (без ограничения символов) */
     private TextFieldWidget nbtField;
 
     /** Полный список предметов (без air и заблокированных) */
@@ -66,13 +74,26 @@ public class ItemBrowserScreen extends Screen {
     private Text status = Text.empty();
 
     /**
-     * Создаёт экран Item Browser.
+     * Создаёт экран Item Browser без привязки к конкретной стойке.
+     * Предметы будут выдаваться на стойку, на которую смотрит игрок.
      *
      * @param parent родительский экран для возврата при закрытии
      */
     public ItemBrowserScreen(Screen parent) {
-        super(Text.literal("Armor Poser Item Giver"));
+        this(parent, null);
+    }
+
+    /**
+     * Создаёт экран Item Browser с привязкой к конкретной стойке для брони.
+     * Используется при открытии из экрана Armor Poser.
+     *
+     * @param parent      родительский экран для возврата при закрытии
+     * @param armorStand  целевая стойка для брони (может быть null)
+     */
+    public ItemBrowserScreen(Screen parent, ArmorStandEntity armorStand) {
+        super(Text.literal("Armor Poser \u2014 Item Giver"));
         this.parent = parent;
+        this.targetArmorStand = armorStand;
     }
 
     /**
@@ -82,13 +103,14 @@ public class ItemBrowserScreen extends Screen {
     protected void init() {
         // --- Поле поиска ---
         searchField = new TextFieldWidget(textRenderer, 10, 26, 180, 20, Text.literal("Поиск"));
-        searchField.setPlaceholder(Text.literal("id/название"));
+        searchField.setPlaceholder(Text.literal("id / название предмета"));
         searchField.setChangedListener(s -> refilter());
         addDrawableChild(searchField);
 
-        // --- Поле NBT ---
+        // --- Поле NBT (без ограничения по символам!) ---
         nbtField = new TextFieldWidget(textRenderer, 200, 26, width - 210, 20, Text.literal("NBT"));
-        nbtField.setPlaceholder(Text.literal("{Enchantments:[...]}"));
+        nbtField.setMaxLength(Integer.MAX_VALUE); // Без ограничения символов
+        nbtField.setPlaceholder(Text.literal("{display:{Name:'{\"text\":\"Custom\"}'}}"));
         addDrawableChild(nbtField);
 
         // --- Кнопки навигации по страницам ---
@@ -243,42 +265,38 @@ public class ItemBrowserScreen extends Screen {
     }
 
     /**
-     * Выдаёт предмет игроку.
-     * Если задано поле NBT, пытается распарсить SNBT и применить к предмету.
-     * Использует {@link ItemGiveService#give} для отправки пакета выдачи.
+     * Выдаёт предмет на стойку для брони.
+     * Использует {@link ItemGiveService#give} для отправки команды/пакета.
+     * Поле NBT-данных применяется без ограничений по длине.
      *
      * @param item предмет для выдачи
      */
     private void give(Item item) {
         ItemStack stack = new ItemStack(item);
 
-        // Попытка применить NBT-компоненты из поля ввода
-        String snbt = nbtField.getText().trim();
-        if (!snbt.isEmpty()) {
+        // Получаем SNBT-строку из поля ввода (без ограничения символов)
+        String rawSnbt = nbtField.getText().trim();
+
+        // Если SNBT задан, пытаемся применить к стаку как custom_data
+        if (!rawSnbt.isEmpty()) {
             try {
-                NbtCompound compound = StringNbtReader.parse(snbt);
-                // Применяем NBT-данные к стаку через компоненты
-                // В 1.21.4 компоненты применяются через ComponentChanges
-                // Для базовой совместимости используем прямое присвоение
+                NbtCompound compound = StringNbtReader.parse(rawSnbt);
                 stack.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
                         net.minecraft.component.type.NbtComponent.of(compound));
             } catch (Exception ignored) {
-                // Некорректный SNBT — просто игнорируем
+                // Некорректный SNBT — raw строка всё равно передаётся в /data merge
             }
         }
 
-        // Определяем слот: текущий выбранный слот хотбара + 36 (offset для сети)
-        MinecraftClient client = MinecraftClient.getInstance();
-        int selected = (client.player == null) ? 36 : 36 + client.player.getInventory().selectedSlot;
-
-        // Выполняем выдачу через сервис
-        String rawComponents = nbtField.getText().trim();
-        boolean ok = ItemGiveService.give(stack, selected, rawComponents);
+        // Выдаём предмет через сервис (стойка из Armor Poser или по взгляду)
+        boolean ok = ItemGiveService.give(stack, rawSnbt, targetArmorStand);
 
         // Обновляем статусное сообщение
-        status = ok
-                ? Text.literal("Готово: предмет отправлен (инвентарь/стойка)")
-                : Text.literal("Не удалось: нужен creative или права на /data merge");
+        if (ok) {
+            status = Text.literal("Готово: предмет отправлен на стойку");
+        } else {
+            status = Text.literal("Не найдена стойка. Смотрите на стойку или откройте из Armor Poser");
+        }
     }
 
     /**
@@ -300,6 +318,13 @@ public class ItemBrowserScreen extends Screen {
 
         // Заголовок экрана
         context.drawText(textRenderer, title, 10, 10, 0xFFFFFF, false);
+
+        // Информация о целевой стойке
+        if (targetArmorStand != null) {
+            context.drawText(textRenderer,
+                    Text.literal("Стойка: " + targetArmorStand.getUuidAsString().substring(0, 8) + "..."),
+                    width - 200, 10, 0x88FF88, false);
+        }
 
         // Отрисовка дочерних виджетов (кнопки, поля ввода)
         super.render(context, mouseX, mouseY, delta);
