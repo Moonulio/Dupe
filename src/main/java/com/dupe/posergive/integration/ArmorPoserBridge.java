@@ -68,6 +68,12 @@ public final class ArmorPoserBridge {
 
         try {
             NbtCompound tag = StringNbtReader.parse(rawTag);
+
+        if (!ClientPlayNetworking.canSend(CHANNEL)) {
+            client.player.sendMessage(Text.literal("[PoserGive] Сервер не зарегистрировал канал armorposer:sync_data (отправка отменена)."), true);
+            return;
+        }
+
             SyncData syncData = new SyncData(stand.getUuid(), tag);
 
             PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
