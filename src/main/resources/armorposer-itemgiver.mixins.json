@@ -1,0 +1,11 @@
+{
+  "required": false,
+  "package": "com.example.armorposeritemgiver.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ArmorPoserScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
