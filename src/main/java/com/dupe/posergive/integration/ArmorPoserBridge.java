@@ -8,6 +8,7 @@ import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
@@ -16,14 +17,10 @@ import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
 /**
- * Client-only bridge for Armor Poser C2S payload flow.
+ * Client-only bridge for Armor Poser-like SyncData(UUID, CompoundTag) C2S flow.
  */
 public final class ArmorPoserBridge {
-    /**
-     * Channel name expected by Armor Poser-side packet listener.
-     * If your server build uses another id, change it here or move to config.
-     */
-    private static final Identifier CHANNEL = Identifier.of("armorposer", "compoundtag");
+    private static final Identifier CHANNEL = Identifier.of("armorposer", "sync_data");
 
     private ArmorPoserBridge() {
     }
@@ -47,14 +44,10 @@ public final class ArmorPoserBridge {
 
         handItems.add(mainhand);
         handItems.add(new NbtCompound());
-
         root.put("HandItems", handItems);
         return root.asString();
     }
 
-    /**
-     * Sends raw armor-stand patch to server using Armor Poser custom payload.
-     */
     public static void sendRawCompoundTag(String rawTag) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.world == null) {
@@ -66,23 +59,24 @@ public final class ArmorPoserBridge {
             return;
         }
 
-        if (rawTag == null || rawTag.isBlank()) {
-            client.player.sendMessage(Text.literal("[PoserGive] Пустой CompoundTag отправлять нельзя."), true);
+        if (!(client.crosshairTarget instanceof EntityHitResult ehr)
+            || ehr.getType() != HitResult.Type.ENTITY
+            || !(ehr.getEntity() instanceof ArmorStandEntity stand)) {
+            client.player.sendMessage(Text.literal("[PoserGive] Наведитесь на ArmorStand перед отправкой."), true);
             return;
         }
 
-        int entityId = -1;
-        if (client.crosshairTarget instanceof EntityHitResult ehr
-            && ehr.getType() == HitResult.Type.ENTITY
-            && ehr.getEntity() instanceof ArmorStandEntity stand) {
-            entityId = stand.getId();
+        try {
+            NbtCompound tag = StringNbtReader.parse(rawTag);
+            SyncData syncData = new SyncData(stand.getUuid(), tag);
+
+            PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
+            syncData.write(buf);
+            ClientPlayNetworking.send(CHANNEL, buf);
+
+            client.player.sendMessage(Text.literal("[PoserGive] SyncData(UUID + CompoundTag) отправлен на сервер."), true);
+        } catch (Exception e) {
+            client.player.sendMessage(Text.literal("[PoserGive] Невалидный CompoundTag: " + e.getMessage()), true);
         }
-
-        PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
-        buf.writeInt(entityId);
-        buf.writeString(rawTag);
-        ClientPlayNetworking.send(CHANNEL, buf);
-
-        client.player.sendMessage(Text.literal("[PoserGive] CompoundTag отправлен на сервер через пакет Armor Poser."), true);
     }
 }
