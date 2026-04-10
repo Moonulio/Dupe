@@ -1,21 +1,30 @@
 package com.dupe.posergive.integration;
 
+import io.netty.buffer.Unpooled;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
+import net.minecraft.network.PacketByteBuf;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
 /**
- * Client-only bridge for Armor Poser flow where a player chat payload contains
- * a CompoundTag that server-side Armor Poser applies to an armor stand template.
+ * Client-only bridge for Armor Poser C2S payload flow.
  */
 public final class ArmorPoserBridge {
+    /**
+     * Channel name expected by Armor Poser-side packet listener.
+     * If your server build uses another id, change it here or move to config.
+     */
+    private static final Identifier CHANNEL = Identifier.of("armorposer", "compoundtag");
+
     private ArmorPoserBridge() {
     }
 
@@ -23,10 +32,6 @@ public final class ArmorPoserBridge {
         return FabricLoader.getInstance().isModLoaded("armorposer");
     }
 
-    /**
-     * Builds a minimal armor-stand NBT patch that sets MAINHAND item count/id.
-     * User can further edit it in raw form before sending.
-     */
     public static String buildMainhandTemplate(ItemStack stack) {
         NbtCompound root = new NbtCompound();
 
@@ -48,11 +53,11 @@ public final class ArmorPoserBridge {
     }
 
     /**
-     * Sends raw nbt text as chat message (Armor Poser server-side parser target).
+     * Sends raw armor-stand patch to server using Armor Poser custom payload.
      */
     public static void sendRawCompoundTag(String rawTag) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.getNetworkHandler() == null) {
+        if (client.player == null || client.world == null) {
             return;
         }
 
@@ -66,18 +71,18 @@ public final class ArmorPoserBridge {
             return;
         }
 
-        client.getNetworkHandler().sendChatMessage(rawTag);
-        client.player.sendMessage(Text.literal("[PoserGive] CompoundTag отправлен в чат-канал Armor Poser."), true);
-    }
-
-    public static boolean isLookingAtArmorStand() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.world == null) {
-            return false;
+        int entityId = -1;
+        if (client.crosshairTarget instanceof EntityHitResult ehr
+            && ehr.getType() == HitResult.Type.ENTITY
+            && ehr.getEntity() instanceof ArmorStandEntity stand) {
+            entityId = stand.getId();
         }
 
-        return (client.crosshairTarget instanceof EntityHitResult ehr)
-            && ehr.getType() == HitResult.Type.ENTITY
-            && (ehr.getEntity() instanceof ArmorStandEntity);
+        PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
+        buf.writeInt(entityId);
+        buf.writeString(rawTag);
+        ClientPlayNetworking.send(CHANNEL, buf);
+
+        client.player.sendMessage(Text.literal("[PoserGive] CompoundTag отправлен на сервер через пакет Armor Poser."), true);
     }
 }
