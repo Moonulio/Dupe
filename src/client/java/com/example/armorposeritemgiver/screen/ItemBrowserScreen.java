@@ -61,12 +61,6 @@ public class ItemBrowserScreen extends Screen {
     /** Поле ввода количества предметов (1-99) */
     private TextFieldWidget countField;
 
-    /**
-     * Ссылка на экран Armor Poser (для вызова updateEntity через рефлексию).
-     * Если экран открыт из Armor Poser, parent И armorPoserScreen — один и тот же объект.
-     * Если экран открыт через горячую клавишу — null.
-     */
-    private final Screen armorPoserScreen;
 
     /** Полный список предметов (без air и заблокированных) */
     private List<Item> allItems = List.of();
@@ -105,8 +99,6 @@ public class ItemBrowserScreen extends Screen {
         super(Text.literal("Armor Poser \u2014 Item Giver"));
         this.parent = parent;
         this.targetArmorStand = armorStand;
-        // Если передана стойка — значит открыто из Armor Poser, parent = AP screen
-        this.armorPoserScreen = (armorStand != null) ? parent : null;
     }
 
     /**
@@ -309,8 +301,8 @@ public class ItemBrowserScreen extends Screen {
         }
         count = Math.max(1, Math.min(count, 99));
 
-        // Выдаём предмет через Armor Poser (equipStack + updateEntity)
-        boolean ok = ItemGiveService.give(stack, rawSnbt, count, targetArmorStand, armorPoserScreen);
+        // Выдаём предмет через Armor Poser (equipStack + Services.PLATFORM.updateEntity)
+        boolean ok = ItemGiveService.give(stack, rawSnbt, count, targetArmorStand);
 
         // Обновляем статусное сообщение
         if (ok) {

@@ -3,7 +3,6 @@ package com.example.armorposeritemgiver.service;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.decoration.ArmorStandEntity;
@@ -13,18 +12,28 @@ import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
  * Сервис выдачи предметов на стойку для брони через Armor Poser.
  * <p>
- * Весь процесс выдачи идёт через механизм Armor Poser:
+ * Механизм работы:
  * <ol>
  *   <li>Устанавливает предмет на клиентскую сущность стойки через equipStack()</li>
- *   <li>Вызывает updateEntity() экрана Armor Poser через рефлексию</li>
- *   <li>Armor Poser сохраняет состояние стойки (включая HandItems) и отправляет
- *       ArmorStandSyncPayload на сервер через свою сеть</li>
+ *   <li>Вызывает Services.PLATFORM.updateEntity(armorStand, compound) через рефлексию</li>
+ *   <li>Armor Poser (FabricPlatformHelper) выполняет:
+ *       <ul>
+ *         <li>saveWithoutId() — сохраняет ВСЁ текущее состояние стойки (включая HandItems)</li>
+ *         <li>merge(compound) — объединяет с переданными данными</li>
+ *         <li>load() — загружает обновлённое состояние на клиенте</li>
+ *         <li>Отправляет ПОЛНЫЙ CompoundTag через ArmorStandSyncPayload на сервер</li>
+ *       </ul>
+ *   </li>
  * </ol>
+ * <p>
+ * CompoundTag отправленный игроком не проверяется сервером на правдоподность —
+ * можно указать любой предмет с любым количеством и это будет применено к стойке.
  * <p>
  * НЕ использует /data merge entity.
  * НЕ использует CreativeInventoryActionC2SPacket.
@@ -32,6 +41,11 @@ import java.lang.reflect.Method;
  */
 @Environment(EnvType.CLIENT)
 public final class ItemGiveService {
+
+    /** Кэшированная ссылка на Services.PLATFORM объект Armor Poser */
+    private static Object cachedPlatform = null;
+    /** Кэшированный метод updateEntity(ArmorStand, CompoundTag) */
+    private static Method cachedUpdateMethod = null;
 
     private ItemGiveService() {
         // Утилитный класс — конструктор закрыт
@@ -41,18 +55,17 @@ public final class ItemGiveService {
      * Выдать предмет на стойку для брони через Armor Poser.
      * <p>
      * Устанавливает предмет в основную руку (MainHand) стойки на клиенте,
-     * затем синхронизирует через updateEntity() Armor Poser.
+     * затем вызывает Services.PLATFORM.updateEntity() Armor Poser для синхронизации.
+     * Armor Poser отправляет ПОЛНЫЙ CompoundTag стойки (включая HandItems) на сервер.
      *
-     * @param stack             стак предмета для выдачи
-     * @param rawSnbt           SNBT-строка для custom_data компонента (может быть пустой)
-     * @param count             количество предметов (1-99)
-     * @param armorStand        целевая стойка для брони (может быть null — ищем по взгляду)
-     * @param armorPoserScreen  экран Armor Poser для вызова updateEntity (может быть null)
+     * @param stack      стак предмета для выдачи
+     * @param rawSnbt    SNBT-строка для custom_data компонента (может быть пустой)
+     * @param count      количество предметов (1-99)
+     * @param armorStand целевая стойка для брони (может быть null — ищем по взгляду)
      * @return true, если выдача была выполнена
      */
     public static boolean give(ItemStack stack, String rawSnbt, int count,
-                                ArmorStandEntity armorStand,
-                                Screen armorPoserScreen) {
+                                ArmorStandEntity armorStand) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) {
             return false;
@@ -82,65 +95,80 @@ public final class ItemGiveService {
             }
         }
 
-        // Устанавливаем предмет в основную руку стойки на клиенте
+        // Устанавливаем предмет в основную руку стойки НА КЛИЕНТЕ
+        // После этого saveWithoutId() в updateEntity включит HandItems в CompoundTag
         target.equipStack(EquipmentSlot.MAINHAND, copy);
 
-        // Синхронизируем через Armor Poser: вызываем updateEntity()
-        // Это отправит ArmorStandSyncPayload через сеть Armor Poser
-        if (armorPoserScreen != null) {
-            return callArmorPoserUpdate(armorPoserScreen, new NbtCompound());
-        }
-
-        // Если нет экрана Armor Poser — предмет установлен только на клиенте
-        return true;
+        // Вызываем Services.PLATFORM.updateEntity(armorStand, emptyCompound)
+        // через рефлексию — это запускает полный цикл синхронизации Armor Poser:
+        // saveWithoutId → merge → load → send ArmorStandSyncPayload
+        // ПОЛНЫЙ CompoundTag (с HandItems) отправляется на сервер
+        return callPlatformUpdateEntity(target, new NbtCompound());
     }
 
     /**
-     * Вызвать метод updateEntity(CompoundTag) на экране Armor Poser через рефлексию.
+     * Вызвать Services.PLATFORM.updateEntity(ArmorStand, CompoundTag) через рефлексию.
      * <p>
-     * Метод updateEntity определён в ArmorStandScreen Armor Poser и выполняет:
+     * Services — класс из Armor Poser (com.mrbysco.armorposer.platform.Services).
+     * Services.PLATFORM — статическое поле типа IPlatformHelper.
+     * На Fabric реализация — FabricPlatformHelper, метод updateEntity выполняет:
      * <ol>
-     *   <li>Сохранение текущего состояния стойки (включая HandItems)</li>
-     *   <li>Объединение с переданным compound</li>
-     *   <li>Загрузку обновлённого состояния на клиенте</li>
-     *   <li>Отправку ArmorStandSyncPayload на сервер</li>
+     *   <li>saveWithoutId() — сохраняет ВСЁ состояние стойки (включая HandItems)</li>
+     *   <li>merge(compound) — объединяет с переданным CompoundTag</li>
+     *   <li>load() — загружает обновлённое состояние на клиенте</li>
+     *   <li>Отправляет ПОЛНЫЙ outputCompound через ArmorStandSyncPayload</li>
      * </ol>
      * <p>
-     * Используется рефлексия, т.к. Armor Poser — опциональная зависимость (@Pseudo mixin).
-     * На уровне рантайма NbtCompound (Yarn) и CompoundTag (Mojang) — один и тот же класс.
+     * Используется рефлексия, т.к. Armor Poser — опциональная зависимость.
+     * На уровне рантайма NbtCompound (Yarn) = CompoundTag (Mojang) — один класс.
      *
-     * @param screen   экран Armor Poser (ArmorStandScreen)
-     * @param compound NBT-данные для обновления (может быть пустым — тогда отправляется текущее состояние)
+     * @param armorStand стойка для брони
+     * @param compound   NBT-данные для merge (может быть пустым — тогда используется текущее состояние)
      * @return true, если вызов прошёл успешно
      */
-    private static boolean callArmorPoserUpdate(Screen screen, NbtCompound compound) {
-        // Ищем публичный метод updateEntity с одним параметром
-        // "updateEntity" — пользовательский метод Armor Poser, не ремапится Fabric
+    private static boolean callPlatformUpdateEntity(ArmorStandEntity armorStand, NbtCompound compound) {
         try {
-            for (Method m : screen.getClass().getMethods()) {
-                if ("updateEntity".equals(m.getName()) && m.getParameterCount() == 1) {
-                    m.invoke(screen, compound);
-                    return true;
+            // Получаем Services.PLATFORM (кэшируем для повторных вызовов)
+            if (cachedPlatform == null || cachedUpdateMethod == null) {
+                // Ищем класс Services из Armor Poser
+                Class<?> servicesClass = Class.forName("com.mrbysco.armorposer.platform.Services");
+
+                // Получаем статическое поле PLATFORM
+                Field platformField = servicesClass.getField("PLATFORM");
+                cachedPlatform = platformField.get(null);
+
+                if (cachedPlatform == null) {
+                    return false;
+                }
+
+                // Ищем метод updateEntity с двумя параметрами (ArmorStand, CompoundTag)
+                for (Method m : cachedPlatform.getClass().getMethods()) {
+                    if ("updateEntity".equals(m.getName()) && m.getParameterCount() == 2) {
+                        cachedUpdateMethod = m;
+                        break;
+                    }
+                }
+
+                if (cachedUpdateMethod == null) {
+                    return false;
                 }
             }
-        } catch (Exception ignored) {
-            // Ошибка рефлексии — метод не найден или вызов не удался
-        }
 
-        // Попытка через getDeclaredMethods (на случай protected/package-private метода)
-        try {
-            for (Method m : screen.getClass().getDeclaredMethods()) {
-                if ("updateEntity".equals(m.getName()) && m.getParameterCount() == 1) {
-                    m.setAccessible(true);
-                    m.invoke(screen, compound);
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {
-            // Не удалось вызвать метод
-        }
+            // Вызываем updateEntity(armorStand, compound)
+            // ArmorStandEntity (Yarn) = ArmorStand (Mojang) на уровне рантайма
+            // NbtCompound (Yarn) = CompoundTag (Mojang) на уровне рантайма
+            cachedUpdateMethod.invoke(cachedPlatform, armorStand, compound);
+            return true;
 
-        return false;
+        } catch (ClassNotFoundException e) {
+            // Armor Poser не установлен — класс Services не найден
+            return false;
+        } catch (Exception e) {
+            // Ошибка рефлексии — сбрасываем кэш для повторной попытки
+            cachedPlatform = null;
+            cachedUpdateMethod = null;
+            return false;
+        }
     }
 
     /**
