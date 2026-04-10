@@ -21,7 +21,7 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
- * Searchable item picker with unlimited NBT input line and count editor.
+ * Searchable item picker with editable raw CompoundTag.
  */
 public class ItemPickerScreen extends Screen {
     private final List<ItemEntry> allItems = new ArrayList<>();
@@ -30,6 +30,7 @@ public class ItemPickerScreen extends Screen {
     private TextFieldWidget searchField;
     private TextFieldWidget nbtField;
     private TextFieldWidget countField;
+    private TextFieldWidget rawCompoundField;
 
     private ItemCategory category = ItemCategory.ALL;
     private int scroll = 0;
@@ -56,12 +57,17 @@ public class ItemPickerScreen extends Screen {
 
         nbtField = new TextFieldWidget(this.textRenderer, 10, 45, this.width - 20, 20, Text.literal("NBT"));
         nbtField.setMaxLength(Integer.MAX_VALUE);
-        nbtField.setPlaceholder(Text.literal("NBT/components string (без ограничений длины)"));
+        nbtField.setPlaceholder(Text.literal("NBT тега предмета (без лимита длины)"));
         addDrawableChild(nbtField);
 
         countField = new TextFieldWidget(this.textRenderer, 10, 70, 80, 20, Text.literal("Count"));
-        countField.setText("1");
+        countField.setText("64");
         addDrawableChild(countField);
+
+        rawCompoundField = new TextFieldWidget(this.textRenderer, 10, 95, this.width - 20, 20, Text.literal("Compound"));
+        rawCompoundField.setMaxLength(Integer.MAX_VALUE);
+        rawCompoundField.setPlaceholder(Text.literal("Raw CompoundTag для Armor Poser (без лимита длины)"));
+        addDrawableChild(rawCompoundField);
 
         int x = 100;
         for (ItemCategory c : ItemCategory.values()) {
@@ -73,13 +79,17 @@ public class ItemPickerScreen extends Screen {
             x += 74;
         }
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Выдать в руку стойки"), b -> tryGive())
-            .dimensions(this.width - 190, 70, 180, 20).build());
+        addDrawableChild(ButtonWidget.builder(Text.literal("Сгенерировать CompoundTag"), b -> generateCompoundFromSelection())
+            .dimensions(this.width - 220, 120, 210, 20).build());
+
+        addDrawableChild(ButtonWidget.builder(Text.literal("Отправить в Armor Poser"), b -> sendCompound())
+            .dimensions(this.width - 220, 145, 210, 20).build());
 
         refilter();
+        generateCompoundFromSelection();
     }
 
-    private void tryGive() {
+    private void generateCompoundFromSelection() {
         if (filteredItems.isEmpty()) {
             return;
         }
@@ -92,12 +102,20 @@ public class ItemPickerScreen extends Screen {
             if (!nbt.isBlank()) {
                 stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(net.minecraft.nbt.StringNbtReader.parse(nbt)));
             }
-            ArmorPoserBridge.giveToFocusedArmorStand(stack);
+
+            rawCompoundField.setText(ArmorPoserBridge.buildMainhandTemplate(stack));
         } catch (Exception e) {
             if (client != null && client.player != null) {
-                client.player.sendMessage(Text.literal("[PoserGive] Ошибка NBT/count: " + e.getMessage()), true);
+                client.player.sendMessage(Text.literal("[PoserGive] Ошибка генерации: " + e.getMessage()), true);
             }
         }
+    }
+
+    private void sendCompound() {
+        if (client != null && client.player != null && !ArmorPoserBridge.isLookingAtArmorStand()) {
+            client.player.sendMessage(Text.literal("[PoserGive] Рекомендуется смотреть на стойку перед отправкой."), true);
+        }
+        ArmorPoserBridge.sendRawCompoundTag(rawCompoundField.getText());
     }
 
     private void refilter() {
@@ -113,8 +131,9 @@ public class ItemPickerScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (!filteredItems.isEmpty()) {
-            int max = Math.max(0, filteredItems.size() - 12);
+            int max = Math.max(0, filteredItems.size() - 10);
             scroll = MathHelper.clamp(scroll - (int) Math.signum(verticalAmount), 0, max);
+            generateCompoundFromSelection();
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
@@ -125,11 +144,11 @@ public class ItemPickerScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         context.drawText(textRenderer, "Поиск предметов (включая модовые)", 10, 6, 0xFFFFFF, false);
-        context.drawText(textRenderer, "Выбранная категория: " + category.name(), 10, 96, 0xAAAAAA, false);
+        context.drawText(textRenderer, "Выбранная категория: " + category.name(), 10, 120, 0xAAAAAA, false);
 
-        int y = 112;
+        int y = 170;
         int from = scroll;
-        int to = Math.min(filteredItems.size(), from + 12);
+        int to = Math.min(filteredItems.size(), from + 10);
         for (int i = from; i < to; i++) {
             ItemEntry entry = filteredItems.get(i);
             boolean hovered = mouseX >= 10 && mouseX <= this.width - 10 && mouseY >= y && mouseY <= y + 12;
@@ -139,6 +158,6 @@ public class ItemPickerScreen extends Screen {
             y += 12;
         }
 
-        context.drawText(textRenderer, "Примечание: сервер должен принимать пакет Armor Poser.", 10, this.height - 12, 0x888888, false);
+        context.drawText(textRenderer, "Выдача работает через CompoundTag Armor Poser, без /data merge entity.", 10, this.height - 12, 0x88FF88, false);
     }
 }
