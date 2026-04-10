@@ -158,7 +158,10 @@ public class ItemBrowserScreen extends Screen {
 
         // Сортировка предметов по полному ID для удобства навигации
         temp.sort(Comparator.comparing(i -> Registries.ITEM.getId(i).toString()));
+        // Сортируем пространства имён, но "all" всегда остаётся первым
+        ns.remove("all");
         ns.sort(String::compareTo);
+        ns.add(0, "all");
 
         allItems = temp;
         namespaces = ns;
