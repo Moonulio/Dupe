@@ -1,21 +1,27 @@
 package com.example.armorposeritemgiver.service;
 
 import com.example.armorposeritemgiver.config.ModConfig;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Выдача предметов/применение к стойке.
  */
 public final class ItemGiveService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ItemGiveService.class);
+
     private ItemGiveService() {
     }
 
@@ -43,11 +49,14 @@ public final class ItemGiveService {
             return true;
         }
 
-        // 3) Legacy unsafe пакетный fallback (как было ранее), только если включено в конфиге.
+        // Legacy unsafe packet fallback is disabled by default.
+        // Sending creative packets outside creative mode can be exploited for item duplication
+        // on servers that do not properly validate game mode.
         if (!ModConfig.get().allowUnsafeWithoutCreative || !isLookingAtArmorStand(client)) {
             return false;
         }
 
+        LOGGER.warn("Using unsafe creative-packet fallback outside creative mode");
         player.networkHandler.sendPacket(new CreativeInventoryActionC2SPacket(slot, copy));
         return true;
     }
@@ -66,9 +75,20 @@ public final class ItemGiveService {
             return false;
         }
 
-        String components = rawSnbtComponents == null || rawSnbtComponents.isBlank()
-                ? "{}"
-                : rawSnbtComponents.trim();
+        String components;
+        if (rawSnbtComponents == null || rawSnbtComponents.isBlank()) {
+            components = "{}";
+        } else {
+            String trimmed = rawSnbtComponents.trim();
+            try {
+                // Validate that the input is well-formed SNBT before embedding in the command
+                StringNbtReader.parse(trimmed);
+                components = trimmed;
+            } catch (CommandSyntaxException e) {
+                LOGGER.warn("Invalid SNBT input rejected: {}", e.getMessage());
+                return false;
+            }
+        }
 
         // Для 1.21+ item данные в командах используют components.
         String handItem = "{id:\"" + id + "\",count:" + stack.getCount() + ",components:" + components + "}";
