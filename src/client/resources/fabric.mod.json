@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "armorposer-itemgiver",
+  "version": "${version}",
+  "name": "Armor Poser Item Giver",
+  "description": "Клиентское дополнение к Armor Poser: поиск и выдача любых предметов на стойку для брони. Работает без креатива/оператора.",
+  "authors": [
+    "Moonulio"
+  ],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.example.armorposeritemgiver.client.ArmorPoserItemGiverClient"
+    ]
+  },
+  "mixins": [
+    "armorposer-itemgiver.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "armorposer": ">=8.1.2"
+  }
+}
