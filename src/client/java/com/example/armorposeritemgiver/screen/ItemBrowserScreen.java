@@ -12,8 +12,6 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -30,11 +28,12 @@ import java.util.Locale;
  * <ul>
  *   <li>Поле поиска по ID или названию предмета</li>
  *   <li>Поле ввода NBT-данных без ограничения по символам (SNBT-формат)</li>
+ *   <li>Поле ввода количества предметов (1-99)</li>
  *   <li>Категории по пространствам имён (minecraft, modid и т.д.)</li>
  *   <li>Постраничная навигация по 45 предметов на странице (9x5 сетка)</li>
  * </ul>
  * При клике на предмет он выдаётся на стойку для брони через {@link ItemGiveService}.
- * Работает без оператора и креативного режима.
+ * Выдача идёт через механизм Armor Poser (updateEntity), без /data merge и без креатива.
  */
 @Environment(EnvType.CLIENT)
 public class ItemBrowserScreen extends Screen {
@@ -59,6 +58,15 @@ public class ItemBrowserScreen extends Screen {
     private TextFieldWidget searchField;
     /** Поле ввода NBT-компонентов в SNBT-формате (без ограничения символов) */
     private TextFieldWidget nbtField;
+    /** Поле ввода количества предметов (1-99) */
+    private TextFieldWidget countField;
+
+    /**
+     * Ссылка на экран Armor Poser (для вызова updateEntity через рефлексию).
+     * Если экран открыт из Armor Poser, parent И armorPoserScreen — один и тот же объект.
+     * Если экран открыт через горячую клавишу — null.
+     */
+    private final Screen armorPoserScreen;
 
     /** Полный список предметов (без air и заблокированных) */
     private List<Item> allItems = List.of();
@@ -83,17 +91,22 @@ public class ItemBrowserScreen extends Screen {
         this(parent, null);
     }
 
+
     /**
      * Создаёт экран Item Browser с привязкой к конкретной стойке для брони.
      * Используется при открытии из экрана Armor Poser.
+     * Родительский экран (parent) также используется как экран Armor Poser
+     * для вызова updateEntity() при выдаче предметов.
      *
-     * @param parent      родительский экран для возврата при закрытии
+     * @param parent      родительский экран (экран Armor Poser) для возврата при закрытии
      * @param armorStand  целевая стойка для брони (может быть null)
      */
     public ItemBrowserScreen(Screen parent, ArmorStandEntity armorStand) {
         super(Text.literal("Armor Poser \u2014 Item Giver"));
         this.parent = parent;
         this.targetArmorStand = armorStand;
+        // Если передана стойка — значит открыто из Armor Poser, parent = AP screen
+        this.armorPoserScreen = (armorStand != null) ? parent : null;
     }
 
     /**
@@ -102,10 +115,16 @@ public class ItemBrowserScreen extends Screen {
     @Override
     protected void init() {
         // --- Поле поиска ---
-        searchField = new TextFieldWidget(textRenderer, 10, 26, 180, 20, Text.literal("Поиск"));
+        searchField = new TextFieldWidget(textRenderer, 10, 26, 150, 20, Text.literal("Поиск"));
         searchField.setPlaceholder(Text.literal("id / название предмета"));
         searchField.setChangedListener(s -> refilter());
         addDrawableChild(searchField);
+
+        // --- Поле количества предметов (1-99) ---
+        countField = new TextFieldWidget(textRenderer, 165, 26, 30, 20, Text.literal("Кол-во"));
+        countField.setMaxLength(2); // Максимум 2 цифры (1-99)
+        countField.setText("1");
+        addDrawableChild(countField);
 
         // --- Поле NBT (без ограничения по символам!) ---
         nbtField = new TextFieldWidget(textRenderer, 200, 26, width - 210, 20, Text.literal("NBT"));
@@ -268,9 +287,10 @@ public class ItemBrowserScreen extends Screen {
     }
 
     /**
-     * Выдаёт предмет на стойку для брони.
-     * Использует {@link ItemGiveService#give} для отправки команды/пакета.
+     * Выдаёт предмет на стойку для брони через Armor Poser.
+     * Использует {@link ItemGiveService#give} для установки предмета и синхронизации.
      * Поле NBT-данных применяется без ограничений по длине.
+     * Количество берётся из поля countField.
      *
      * @param item предмет для выдачи
      */
@@ -280,25 +300,23 @@ public class ItemBrowserScreen extends Screen {
         // Получаем SNBT-строку из поля ввода (без ограничения символов)
         String rawSnbt = nbtField.getText().trim();
 
-        // Если SNBT задан, пытаемся применить к стаку как custom_data
-        if (!rawSnbt.isEmpty()) {
-            try {
-                NbtCompound compound = StringNbtReader.parse(rawSnbt);
-                stack.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
-                        net.minecraft.component.type.NbtComponent.of(compound));
-            } catch (Exception ignored) {
-                // Некорректный SNBT — raw строка всё равно передаётся в /data merge
-            }
+        // Парсим количество из поля ввода
+        int count = 1;
+        try {
+            count = Integer.parseInt(countField.getText().trim());
+        } catch (NumberFormatException ignored) {
+            // Некорректное число — используем 1
         }
+        count = Math.max(1, Math.min(count, 99));
 
-        // Выдаём предмет через сервис (стойка из Armor Poser или по взгляду)
-        boolean ok = ItemGiveService.give(stack, rawSnbt, targetArmorStand);
+        // Выдаём предмет через Armor Poser (equipStack + updateEntity)
+        boolean ok = ItemGiveService.give(stack, rawSnbt, count, targetArmorStand, armorPoserScreen);
 
         // Обновляем статусное сообщение
         if (ok) {
-            status = Text.literal("Готово: предмет отправлен на стойку");
+            status = Text.literal("Готово: предмет отправлен на стойку (x" + count + ")");
         } else {
-            status = Text.literal("Не найдена стойка. Смотрите на стойку или откройте из Armor Poser");
+            status = Text.literal("Не найдена стойка. Откройте из Armor Poser");
         }
     }
 

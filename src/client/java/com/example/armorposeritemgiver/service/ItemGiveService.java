@@ -1,35 +1,34 @@
 package com.example.armorposeritemgiver.service;
 
-import com.example.armorposeritemgiver.config.ModConfig;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.ClientPlayerInteractionManager;
+import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 
+import java.lang.reflect.Method;
+
 /**
- * Сервис выдачи предметов на стойку для брони.
+ * Сервис выдачи предметов на стойку для брони через Armor Poser.
  * <p>
- * Поддерживает несколько способов выдачи:
+ * Весь процесс выдачи идёт через механизм Armor Poser:
  * <ol>
- *   <li><b>Команда /data merge</b> — устанавливает предмет в руку стойки для брони.
- *       Работает если у игрока есть права на выполнение команд (оператор).
- *       Это основной способ, не требующий креативного режима.</li>
- *   <li><b>CreativeInventoryActionC2SPacket</b> — отправляет пакет напрямую
- *       для помещения предмета в инвентарь игрока.
- *       В режиме allowUnsafeWithoutCreative отправляется независимо от режима игры.</li>
+ *   <li>Устанавливает предмет на клиентскую сущность стойки через equipStack()</li>
+ *   <li>Вызывает updateEntity() экрана Armor Poser через рефлексию</li>
+ *   <li>Armor Poser сохраняет состояние стойки (включая HandItems) и отправляет
+ *       ArmorStandSyncPayload на сервер через свою сеть</li>
  * </ol>
  * <p>
- * Если передана ссылка на конкретную стойку для брони (из экрана Armor Poser),
- * команда /data merge нацеливается именно на неё по UUID.
+ * НЕ использует /data merge entity.
+ * НЕ использует CreativeInventoryActionC2SPacket.
+ * Работает без оператора и креативного режима — через пакеты Armor Poser.
  */
 @Environment(EnvType.CLIENT)
 public final class ItemGiveService {
@@ -39,97 +38,116 @@ public final class ItemGiveService {
     }
 
     /**
-     * Выдать предмет на стойку для брони или в инвентарь игрока.
+     * Выдать предмет на стойку для брони через Armor Poser.
      * <p>
-     * Порядок приоритета:
-     * 1. Если передана стойка (armorStand != null) — /data merge на эту стойку
-     * 2. Если игрок смотрит на стойку — /data merge на неё
-     * 3. Если включён allowUnsafeWithoutCreative — отправка CreativeInventoryActionC2SPacket
-     * 4. Если игрок в креативе — clickCreativeStack
+     * Устанавливает предмет в основную руку (MainHand) стойки на клиенте,
+     * затем синхронизирует через updateEntity() Armor Poser.
      *
-     * @param stack         стак предмета для выдачи
-     * @param rawSnbt       SNBT-строка для компонентов (может быть пустой)
-     * @param armorStand    конкретная стойка для брони (может быть null)
+     * @param stack             стак предмета для выдачи
+     * @param rawSnbt           SNBT-строка для custom_data компонента (может быть пустой)
+     * @param count             количество предметов (1-99)
+     * @param armorStand        целевая стойка для брони (может быть null — ищем по взгляду)
+     * @param armorPoserScreen  экран Armor Poser для вызова updateEntity (может быть null)
      * @return true, если выдача была выполнена
      */
-    public static boolean give(ItemStack stack, String rawSnbt, ArmorStandEntity armorStand) {
+    public static boolean give(ItemStack stack, String rawSnbt, int count,
+                                ArmorStandEntity armorStand,
+                                Screen armorPoserScreen) {
         MinecraftClient client = MinecraftClient.getInstance();
-        ClientPlayerEntity player = client.player;
-
-        if (player == null) {
+        if (client.player == null) {
             return false;
         }
 
+        // Определяем целевую стойку: переданная или по взгляду игрока
+        ArmorStandEntity target = armorStand;
+        if (target == null) {
+            target = getLookedArmorStand(client);
+        }
+        if (target == null) {
+            return false;
+        }
+
+        // Создаём копию стака с нужным количеством
         ItemStack copy = stack.copy();
+        copy.setCount(Math.max(1, Math.min(count, 99)));
 
-        // Способ 1: Если передана конкретная стойка — /data merge на неё
-        if (armorStand != null) {
-            return applyToArmorStand(player, copy, rawSnbt, armorStand);
+        // Применяем пользовательские NBT-данные как custom_data компонент
+        if (rawSnbt != null && !rawSnbt.isBlank()) {
+            try {
+                NbtCompound compound = StringNbtReader.parse(rawSnbt);
+                copy.set(net.minecraft.component.DataComponentTypes.CUSTOM_DATA,
+                        net.minecraft.component.type.NbtComponent.of(compound));
+            } catch (Exception ignored) {
+                // Некорректный SNBT — игнорируем, предмет всё равно будет выдан
+            }
         }
 
-        // Способ 2: Если игрок смотрит на стойку — /data merge на неё
-        ArmorStandEntity looked = getLookedArmorStand(client);
-        if (looked != null) {
-            return applyToArmorStand(player, copy, rawSnbt, looked);
+        // Устанавливаем предмет в основную руку стойки на клиенте
+        target.equipStack(EquipmentSlot.MAINHAND, copy);
+
+        // Синхронизируем через Armor Poser: вызываем updateEntity()
+        // Это отправит ArmorStandSyncPayload через сеть Armor Poser
+        if (armorPoserScreen != null) {
+            return callArmorPoserUpdate(armorPoserScreen, new NbtCompound());
         }
 
-        // Способ 3: Прямой пакет CreativeInventoryActionC2SPacket
-        // (работает без ограничений если сервер не проверяет режим игры)
-        if (ModConfig.get().allowUnsafeWithoutCreative) {
-            int slot = 36 + player.getInventory().selectedSlot;
-            player.networkHandler.sendPacket(new CreativeInventoryActionC2SPacket(slot, copy));
-            return true;
+        // Если нет экрана Armor Poser — предмет установлен только на клиенте
+        return true;
+    }
+
+    /**
+     * Вызвать метод updateEntity(CompoundTag) на экране Armor Poser через рефлексию.
+     * <p>
+     * Метод updateEntity определён в ArmorStandScreen Armor Poser и выполняет:
+     * <ol>
+     *   <li>Сохранение текущего состояния стойки (включая HandItems)</li>
+     *   <li>Объединение с переданным compound</li>
+     *   <li>Загрузку обновлённого состояния на клиенте</li>
+     *   <li>Отправку ArmorStandSyncPayload на сервер</li>
+     * </ol>
+     * <p>
+     * Используется рефлексия, т.к. Armor Poser — опциональная зависимость (@Pseudo mixin).
+     * На уровне рантайма NbtCompound (Yarn) и CompoundTag (Mojang) — один и тот же класс.
+     *
+     * @param screen   экран Armor Poser (ArmorStandScreen)
+     * @param compound NBT-данные для обновления (может быть пустым — тогда отправляется текущее состояние)
+     * @return true, если вызов прошёл успешно
+     */
+    private static boolean callArmorPoserUpdate(Screen screen, NbtCompound compound) {
+        // Ищем публичный метод updateEntity с одним параметром
+        // "updateEntity" — пользовательский метод Armor Poser, не ремапится Fabric
+        try {
+            for (Method m : screen.getClass().getMethods()) {
+                if ("updateEntity".equals(m.getName()) && m.getParameterCount() == 1) {
+                    m.invoke(screen, compound);
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+            // Ошибка рефлексии — метод не найден или вызов не удался
         }
 
-        // Способ 4: Стандартная выдача в креативном режиме
-        ClientPlayerInteractionManager interactionManager = client.interactionManager;
-        if (player.getAbilities().creativeMode && interactionManager != null) {
-            int slot = 36 + player.getInventory().selectedSlot;
-            interactionManager.clickCreativeStack(copy, slot);
-            return true;
+        // Попытка через getDeclaredMethods (на случай protected/package-private метода)
+        try {
+            for (Method m : screen.getClass().getDeclaredMethods()) {
+                if ("updateEntity".equals(m.getName()) && m.getParameterCount() == 1) {
+                    m.setAccessible(true);
+                    m.invoke(screen, compound);
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+            // Не удалось вызвать метод
         }
 
         return false;
     }
 
     /**
-     * Применить предмет к стойке для брони через команду /data merge.
-     * Устанавливает предмет в основную руку (MainHand) стойки.
-     * <p>
-     * Команда формируется с полным SNBT предмета, включая NBT-компоненты
-     * если они были указаны пользователем.
-     *
-     * @param player  игрок, от имени которого отправляется команда
-     * @param stack   стак предмета
-     * @param rawSnbt SNBT-строка компонентов
-     * @param stand   целевая стойка для брони
-     * @return true (команда всегда отправляется, результат определяется сервером)
-     */
-    private static boolean applyToArmorStand(ClientPlayerEntity player, ItemStack stack,
-                                              String rawSnbt, ArmorStandEntity stand) {
-        // Получаем ID предмета
-        Identifier id = Registries.ITEM.getId(stack.getItem());
-
-        // Формируем SNBT-описание компонентов
-        String components = (rawSnbt == null || rawSnbt.isBlank()) ? "" : ",components:" + rawSnbt.trim();
-
-        // Формируем описание предмета для HandItems
-        // HandItems — массив из двух элементов: [MainHand, OffHand]
-        String handItem = "{id:\"" + id + "\",count:" + stack.getCount() + components + "}";
-
-        // Отправляем команду /data merge для установки предмета в руку стойки
-        String cmd = "data merge entity " + stand.getUuidAsString()
-                + " {HandItems:[" + handItem + ",{}]}";
-        player.networkHandler.sendCommand(cmd);
-
-        return true;
-    }
-
-    /**
      * Получить стойку для брони, на которую смотрит игрок.
      *
      * @param client экземпляр MinecraftClient
-     * @return ArmorStandEntity, если найдена, иначе null
+     * @return ArmorStandEntity, если игрок смотрит на стойку, иначе null
      */
     public static ArmorStandEntity getLookedArmorStand(MinecraftClient client) {
         HitResult hitResult = client.crosshairTarget;

@@ -56,8 +56,9 @@ public class ModConfig {
     public Set<String> blacklist = new HashSet<>();
 
     /**
-     * Если true — разрешает отправку пакетов выдачи предметов даже вне креативного режима
-     * (например, при наведении на стойку для брони через команду /data merge).
+     * Зарезервировано для будущего использования.
+     * В текущей версии выдача идёт полностью через Armor Poser (updateEntity),
+     * без /data merge и без креативного режима.
      */
     public boolean allowUnsafeWithoutCreative = true;
 
