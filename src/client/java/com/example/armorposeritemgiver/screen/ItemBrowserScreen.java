@@ -16,6 +16,9 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.nbt.StringNbtReader;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -28,9 +31,12 @@ import java.util.Locale;
  * - применение NBT через SNBT
  */
 public class ItemBrowserScreen extends Screen {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ItemBrowserScreen.class);
     private static final int ROWS = 5;
     private static final int COLS = 9;
     private static final int PER_PAGE = ROWS * COLS;
+    private static final int SEARCH_MAX_LENGTH = 256;
+    private static final int NBT_MAX_LENGTH = 1024;
 
     private final Screen parent;
     private TextFieldWidget searchField;
@@ -52,11 +58,13 @@ public class ItemBrowserScreen extends Screen {
     protected void init() {
         this.searchField = new TextFieldWidget(textRenderer, 10, 26, 180, 20, Text.literal("Поиск"));
         this.searchField.setPlaceholder(Text.literal("id/название"));
+        this.searchField.setMaxLength(SEARCH_MAX_LENGTH);
         this.searchField.setChangedListener(s -> refilter());
         this.addDrawableChild(searchField);
 
         this.nbtField = new TextFieldWidget(textRenderer, 200, 26, width - 210, 20, Text.literal("NBT"));
         this.nbtField.setPlaceholder(Text.literal("{Enchantments:[...]}"));
+        this.nbtField.setMaxLength(NBT_MAX_LENGTH);
         this.addDrawableChild(nbtField);
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("<"), b -> previousPage())
@@ -174,7 +182,8 @@ public class ItemBrowserScreen extends Screen {
         if (!snbt.isEmpty()) {
             try {
                 stack.applyChanges(ComponentChanges.fromNbt(StringNbtReader.parse(snbt)));
-            } catch (CommandSyntaxException ignored) {
+            } catch (CommandSyntaxException e) {
+                LOGGER.warn("Invalid SNBT in NBT field: {}", e.getMessage());
             }
         }
 

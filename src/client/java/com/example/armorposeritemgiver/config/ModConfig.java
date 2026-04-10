@@ -7,6 +7,9 @@ import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.util.Identifier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -20,6 +23,7 @@ import java.util.Set;
  * Конфиг с горячей клавишей и blacklist-ом предметов.
  */
 public class ModConfig {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ModConfig.class);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Type TYPE = new TypeToken<ModConfig>() { }.getType();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("armorposer-itemgiver.json");
@@ -28,7 +32,7 @@ public class ModConfig {
 
     public int openScreenKey = ArmorPoserItemGiverClient.defaultKey();
     public Set<String> blacklist = new HashSet<>();
-    public boolean allowUnsafeWithoutCreative = true;
+    public boolean allowUnsafeWithoutCreative = false;
 
     public static ModConfig get() {
         if (INSTANCE == null) {
@@ -41,7 +45,8 @@ public class ModConfig {
         if (Files.exists(PATH)) {
             try (Reader reader = Files.newBufferedReader(PATH)) {
                 INSTANCE = GSON.fromJson(reader, TYPE);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOGGER.error("Failed to load config, using defaults", e);
                 INSTANCE = new ModConfig();
             }
         } else {
@@ -60,7 +65,8 @@ public class ModConfig {
             try (Writer writer = Files.newBufferedWriter(PATH)) {
                 GSON.toJson(get(), TYPE, writer);
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            LOGGER.error("Failed to save config", e);
         }
     }
 
