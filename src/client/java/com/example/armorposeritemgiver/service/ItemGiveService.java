@@ -5,7 +5,7 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
-
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
@@ -115,7 +115,7 @@ public final class ItemGiveService {
 
         // Формируем CompoundTag с HandItems и отправляем через Armor Poser
         RegistryWrapper.WrapperLookup registries = client.world.getRegistryManager();
-        NbtCompound compound = buildHandItemsCompound(copy, registries);
+        NbtCompound compound = buildHandItemsCompound(copy, target, registries);
 
         return sendArmorStandSync(target.getUuid(), compound);
     }
@@ -125,21 +125,31 @@ public final class ItemGiveService {
      * <p>
      * HandItems — это список из двух предметов: [MainHand, OffHand].
      * Предмет сериализуется через ItemStack.toNbt() (Yarn 1.21.4).
+     * <p>
+     * Для OffHand берём текущий предмет стойки, чтобы не затирать его при выдаче
+     * в основную руку.
      *
      * @param mainHand   предмет для основной руки стойки
-     * @param registries реестр для сериализации предмета
-     * @return CompoundTag вида {HandItems: [{id:"...", count:N, ...}, {}]}
+     * @param target     целевая стойка для брони (для чтения текущего OffHand)
+     * @param registries реестр для сериализации предметов
+     * @return CompoundTag вида {HandItems: [{mainHand NBT}, {offHand NBT}]}
      */
     private static NbtCompound buildHandItemsCompound(ItemStack mainHand,
+                                                       ArmorStandEntity target,
                                                        RegistryWrapper.WrapperLookup registries) {
         NbtList handItems = new NbtList();
 
-        // Основная рука — сериализуем предмет в NBT
+        // Основная рука — сериализуем новый предмет в NBT
         NbtElement mainHandNbt = mainHand.toNbt(registries);
         handItems.add(mainHandNbt);
 
-        // Вторая рука — пустой CompoundTag (OffHand остаётся как есть)
-        handItems.add(new NbtCompound());
+        // Вторая рука — сохраняем текущий предмет стойки, чтобы не затереть его
+        ItemStack currentOffHand = target.getEquippedStack(EquipmentSlot.OFFHAND);
+        if (currentOffHand != null && !currentOffHand.isEmpty()) {
+            handItems.add(currentOffHand.toNbt(registries));
+        } else {
+            handItems.add(new NbtCompound());
+        }
 
         NbtCompound compound = new NbtCompound();
         compound.put("HandItems", handItems);

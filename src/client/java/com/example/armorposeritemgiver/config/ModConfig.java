@@ -119,6 +119,6 @@ public class ModConfig {
      * @return true, если предмет в чёрном списке
      */
     public boolean isBlacklisted(Identifier id) {
-        return blacklist.contains(id.toString());
+        return blacklist != null && blacklist.contains(id.toString());
     }
 }
