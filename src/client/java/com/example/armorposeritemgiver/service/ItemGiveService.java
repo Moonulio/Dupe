@@ -5,7 +5,7 @@ import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
+
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
@@ -31,12 +31,15 @@ import java.util.UUID;
  *   <li>Сервер получает CompoundTag и применяет данные к стойке для брони</li>
  * </ol>
  * <p>
- * CompoundTag отправленный игроком не проверяется сервером на правдоподность —
- * можно указать любой предмет с любым количеством и это будет применено к стойке.
- * Например: 64 алмазных блока в руке стойки.
+ * <b>ВАЖНО:</b> В Armor Poser 8.0.1+ для MC 1.21.4 на сервере добавлена фильтрация
+ * allowedKeys в SyncData.handleData(). Ключ "HandItems" НЕ входит в allowedKeys,
+ * поэтому на серверах с новой версией AP HandItems будет отфильтрован.
+ * На серверах со СТАРОЙ версией AP (без фильтрации) CompoundTag принимается целиком
+ * и предметы выдаются корректно.
  * <p>
- * Также устанавливает предмет на клиентскую сущность через equipStack()
- * для немедленного визуального отображения.
+ * Предмет НЕ устанавливается на клиентскую сущность (без equipStack()),
+ * чтобы избежать "фантомных" предметов, которые видны только на клиенте.
+ * Если сервер принял HandItems — он сам синхронизирует стойку обратно клиенту.
  * <p>
  * НЕ использует /data merge entity.
  * НЕ использует CreativeInventoryActionC2SPacket.
@@ -105,8 +108,10 @@ public final class ItemGiveService {
             }
         }
 
-        // Устанавливаем предмет на клиентскую сущность для немедленного отображения
-        target.equipStack(EquipmentSlot.MAINHAND, copy);
+        // НЕ вызываем equipStack() на клиенте — это создавало "фантомные" предметы,
+        // которые видны только на клиенте, но отсутствуют на сервере.
+        // Если сервер примет HandItems из нашего CompoundTag, он сам синхронизирует
+        // стойку обратно клиенту через EntityEquipmentUpdateS2CPacket.
 
         // Формируем CompoundTag с HandItems и отправляем через Armor Poser
         RegistryWrapper.WrapperLookup registries = client.world.getRegistryManager();
