@@ -78,6 +78,6 @@ public class ItemGiverConfig {
      * Проверить, находится ли предмет в чёрном списке.
      */
     public boolean isBlacklisted(String itemId) {
-        return blacklistedItems.contains(itemId);
+        return blacklistedItems != null && blacklistedItems.contains(itemId);
     }
 }

@@ -527,18 +527,21 @@ public class ItemGiverScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // Позволяем вводить текст в поля даже если нажата клавиша закрытия
+        // Позволяем вводить текст в поля, но не блокируем Escape
         if (searchField != null && searchField.isFocused()) {
-            searchField.keyPressed(keyCode, scanCode, modifiers);
-            return true;
+            if (searchField.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
         }
         if (nbtField != null && nbtField.isFocused()) {
-            nbtField.keyPressed(keyCode, scanCode, modifiers);
-            return true;
+            if (nbtField.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
         }
         if (countField != null && countField.isFocused()) {
-            countField.keyPressed(keyCode, scanCode, modifiers);
-            return true;
+            if (countField.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }

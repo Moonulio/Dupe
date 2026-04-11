@@ -146,14 +146,14 @@ public class ItemCategories {
     }
 
     private static boolean isCombat(String id) {
-        return id.contains("sword") || id.contains("bow") || id.contains("arrow") ||
+        return id.contains("sword") || id.endsWith("bow") || id.contains("arrow") ||
                id.contains("crossbow") || id.contains("trident") || id.contains("shield") ||
                id.contains("helmet") || id.contains("chestplate") || id.contains("leggings") ||
                id.contains("boots") || id.contains("mace") || id.contains("_armor");
     }
 
     private static boolean isTool(String id) {
-        return id.contains("pickaxe") || id.contains("axe") || id.contains("shovel") ||
+        return id.contains("pickaxe") || (id.contains("_axe") && !id.contains("waxe")) || id.contains("shovel") ||
                id.contains("hoe") || id.contains("shears") || id.contains("flint_and_steel") ||
                id.contains("fishing_rod") || id.contains("compass") || id.contains("clock") ||
                id.contains("spyglass") || id.contains("brush") || id.contains("bucket");
