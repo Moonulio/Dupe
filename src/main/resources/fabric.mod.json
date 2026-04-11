@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "armorposer_itemgiver",
+  "version": "${version}",
+  "name": "Armor Poser Item Giver",
+  "description": "Client-side addon for Armor Poser that provides item giving through armor stand NBT manipulation",
+  "authors": ["Moonulio"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/armorposer_itemgiver/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.dupemod.client.ItemGiverClientMod"
+    ]
+  },
+  "mixins": [
+    "armorposer_itemgiver.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "armorposer": "*"
+  }
+}
